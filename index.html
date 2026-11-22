@@ -29,18 +29,16 @@
   h1 { font-size: 20px; margin: 0; letter-spacing: .2px; }
   header p { margin: 2px 0 0; color: var(--hint); font-size: 13px; }
 
-  .section-title { display: flex; justify-content: space-between; align-items: baseline;
-                   margin: 0 16px 8px; font-size: 13px; color: var(--hint); font-weight: 600; letter-spacing: .3px; }
-  .section-title span:last-child { font-weight: 400; }
+  .section-title { margin: 0 16px 8px; font-size: 13px; color: var(--hint); font-weight: 600; letter-spacing: .3px; }
   .card { background: var(--card); border-radius: 14px; overflow: hidden; margin-bottom: 22px;
           box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-  .row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; min-height: 60px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; min-height: 62px; cursor: pointer; }
   .row + .row { border-top: 1px solid var(--line); }
-  .row.pick { cursor: pointer; }
-  .badge { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; flex: none;
-           font-size: 13px; font-weight: 700; background: var(--line); color: var(--hint); transition: all .15s; }
-  .badge.first { background: var(--accent); color: var(--accent-text); }
-  .badge.spare { background: transparent; border: 1.5px dashed var(--hint); font-size: 11px; }
+  .row.static { cursor: default; }
+  .radio { width: 24px; height: 24px; border-radius: 50%; flex: none; border: 2px solid var(--line); transition: all .15s;
+           display: grid; place-items: center; }
+  .row.on .radio { border-color: var(--accent); background: var(--accent); }
+  .row.on .radio::after { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--accent-text); }
   .icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex: none;
           font-weight: 700; font-size: 15px; color: #fff; }
   .i-claude { background: #d97757; } .i-agy { background: #4c8bf5; }
@@ -48,10 +46,10 @@
   .meta { flex: 1; min-width: 0; }
   .name { font-size: 16px; font-weight: 500; }
   .sub { font-size: 12.5px; color: var(--hint); margin-top: 1px; }
+  .row.on .sub { color: var(--accent); }
   .pill { font-size: 12px; padding: 3px 9px; border-radius: 999px; white-space: nowrap; flex: none; font-weight: 500; }
   .pill.ok { color: var(--ok); background: var(--ok-bg); }
   .pill.bad { color: var(--warn); background: var(--warn-bg); }
-  .pill.off { color: var(--hint); background: var(--line); }
 
   .switch { position: relative; width: 50px; height: 30px; flex: none; }
   .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
@@ -61,26 +59,24 @@
   .switch input:checked + i { background: var(--ok); }
   .switch input:checked + i::after { transform: translateX(20px); }
 
-  .foot { color: var(--hint); font-size: 12.5px; margin: -12px 16px 22px; line-height: 1.5; }
   #outside { display: none; text-align: center; color: var(--hint); margin-top: 24px; }
 </style>
 </head>
 <body>
 <header>
   <div class="logo">🤖</div>
-  <div><h1>用哪个 agent</h1><p>排在前面的先用，用不了自动往下换</p></div>
+  <div><h1>用哪个 agent</h1><p>选谁就只用谁，到限额就等着，不会自动换</p></div>
 </header>
 
-<div class="section-title"><span>写代码</span><span>点一下设为先用</span></div>
+<div class="section-title">写代码</div>
 <div class="card" id="writers"></div>
-<div class="foot">备用只在上面两个都用不了时才接手。</div>
 
-<div class="section-title"><span>审查</span></div>
+<div class="section-title">审查</div>
 <div class="card" id="reviewers"></div>
 
-<div class="section-title"><span>额度冷却</span></div>
+<div class="section-title">额度冷却</div>
 <div class="card">
-  <div class="row">
+  <div class="row static">
     <div class="meta"><div class="name">清掉冷却，马上重试</div><div class="sub">报过额度不够的 agent 会先歇一会儿</div></div>
     <label class="switch"><input type="checkbox" id="clear"><i></i></label>
   </div>
@@ -93,51 +89,42 @@
   var tg = window.Telegram && window.Telegram.WebApp;
   var NAMES = { claude: "Claude Code", agy: "反重力", codex: "Codex", omp: "omp" };
   var ICONS = { claude: "C", agy: "反", codex: "▲", omp: "π" };
+  var WRITERS = ["claude", "agy", "omp"], REVIEWERS = ["codex", "omp"];
   var state = {};
   try { state = JSON.parse(new URLSearchParams(location.search).get("s") || "{}") || {}; } catch (e) { state = {}; }
-  var order = (Array.isArray(state.order) ? state.order : []).filter(function (e) { return e === "claude" || e === "agy"; });
-  ["claude", "agy"].forEach(function (e) { if (order.indexOf(e) < 0) order.push(e); });
-  var initial = { first: order[0], wb: state.writer_backup !== false, rb: state.review_backup !== false };
-  var cur = { first: initial.first, wb: initial.wb, rb: initial.rb, clear: false };
+  var initial = {
+    writer: WRITERS.indexOf(state.writer) >= 0 ? state.writer : "claude",
+    reviewer: REVIEWERS.indexOf(state.reviewer) >= 0 ? state.reviewer : "codex"
+  };
+  var cur = { writer: initial.writer, reviewer: initial.reviewer, clear: false };
 
-  function pill(engine, on) {
-    if (on === false) return '<span class="pill off">不用</span>';
+  function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function pill(engine) {
     var s = state[engine];
     return s ? '<span class="pill bad">' + esc(s) + "</span>" : '<span class="pill ok">可用</span>';
   }
-  function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
-  function agent(engine, badge, badgeCls, sub, right, pick) {
-    return '<div class="row' + (pick ? ' pick" data-pick="' + engine : "") + '">' +
-      '<span class="badge ' + badgeCls + '">' + badge + "</span>" +
-      '<span class="icon i-' + engine + '">' + ICONS[engine] + "</span>" +
-      '<div class="meta"><div class="name">' + NAMES[engine] + '</div><div class="sub">' + sub + "</div></div>" + right + "</div>";
+  function rows(list, picked, group) {
+    return list.map(function (e) {
+      var on = e === picked;
+      return '<div class="row' + (on ? " on" : "") + '" data-group="' + group + '" data-engine="' + e + '">' +
+        '<span class="radio"></span><span class="icon i-' + e + '">' + ICONS[e] + "</span>" +
+        '<div class="meta"><div class="name">' + NAMES[e] + '</div><div class="sub">' + (on ? "在用" : "点一下改用它") + "</div></div>" +
+        pill(e) + "</div>";
+    }).join("");
   }
-  function backupRow(id, on) {
-    return '<div class="row"><span class="badge spare">备</span><span class="icon i-omp">' + ICONS.omp + "</span>" +
-      '<div class="meta"><div class="name">omp</div><div class="sub">备用 · ' + (on ? pillText("omp") : "关着") + "</div></div>" +
-      '<label class="switch"><input type="checkbox" id="' + id + '"' + (on ? " checked" : "") + "><i></i></label></div>";
-  }
-  function pillText(engine) { return state[engine] ? esc(state[engine]) : "可用"; }
-
   function render() {
-    var second = cur.first === "claude" ? "agy" : "claude";
-    document.getElementById("writers").innerHTML =
-      agent(cur.first, "1", "first", "先用", pill(cur.first), true) +
-      agent(second, "2", "", "第一个用不了时", pill(second), true) +
-      backupRow("wb", cur.wb);
-    document.getElementById("reviewers").innerHTML =
-      agent("codex", "1", "first", "固定先用", pill("codex"), false) +
-      backupRow("rb", cur.rb);
-    document.querySelectorAll("[data-pick]").forEach(function (el) {
-      el.addEventListener("click", function () { cur.first = el.getAttribute("data-pick"); haptic(); render(); });
-    });
-    ["wb", "rb"].forEach(function (id) {
-      document.getElementById(id).addEventListener("change", function (ev) { cur[id] = ev.target.checked; haptic(); render(); });
+    document.getElementById("writers").innerHTML = rows(WRITERS, cur.writer, "writer");
+    document.getElementById("reviewers").innerHTML = rows(REVIEWERS, cur.reviewer, "reviewer");
+    document.querySelectorAll("[data-engine]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        cur[el.getAttribute("data-group")] = el.getAttribute("data-engine");
+        haptic(); render();
+      });
     });
     refresh();
   }
   function haptic() { try { tg && tg.HapticFeedback && tg.HapticFeedback.selectionChanged(); } catch (e) {} }
-  function changed() { return cur.first !== initial.first || cur.wb !== initial.wb || cur.rb !== initial.rb || cur.clear; }
+  function changed() { return cur.writer !== initial.writer || cur.reviewer !== initial.reviewer || cur.clear; }
   function refresh() { if (!tg || !tg.MainButton) return; changed() ? tg.MainButton.show() : tg.MainButton.hide(); }
 
   document.getElementById("clear").addEventListener("change", function (ev) { cur.clear = ev.target.checked; haptic(); refresh(); });
@@ -149,7 +136,7 @@
     try { tg.setHeaderColor("secondary_bg_color"); tg.setBackgroundColor("secondary_bg_color"); } catch (e) {}
     tg.MainButton.setText("保存");
     tg.MainButton.onClick(function () {
-      tg.sendData(JSON.stringify({ first: cur.first, writer_backup: cur.wb, review_backup: cur.rb, clear: cur.clear }));
+      tg.sendData(JSON.stringify({ first: cur.writer, reviewer: cur.reviewer, clear: cur.clear }));
     });
   } else if (!location.search) {
     document.getElementById("outside").style.display = "block";
