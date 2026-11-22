@@ -59,6 +59,7 @@
   .switch input:checked + i { background: var(--ok); }
   .switch input:checked + i::after { transform: translateX(20px); }
 
+  .foot { color: var(--hint); font-size: 12.5px; margin: -12px 16px 22px; line-height: 1.5; }
   #outside { display: none; text-align: center; color: var(--hint); margin-top: 24px; }
 </style>
 </head>
@@ -73,6 +74,10 @@
 
 <div class="section-title">审查</div>
 <div class="card" id="reviewers"></div>
+
+<div class="section-title">发版</div>
+<div class="card" id="releasers"></div>
+<div class="foot">发版本身是程序在跑，只有卡住时修、CI 跑完后收尾才用这个 agent。</div>
 
 <div class="section-title">额度冷却</div>
 <div class="card">
@@ -89,14 +94,15 @@
   var tg = window.Telegram && window.Telegram.WebApp;
   var NAMES = { claude: "Claude Code", agy: "反重力", codex: "Codex", omp: "omp" };
   var ICONS = { claude: "C", agy: "反", codex: "▲", omp: "π" };
-  var WRITERS = ["claude", "agy", "omp"], REVIEWERS = ["codex", "omp"];
+  var WRITERS = ["claude", "agy", "omp"], REVIEWERS = ["codex", "omp"], RELEASERS = ["claude", "agy", "omp"];
   var state = {};
   try { state = JSON.parse(new URLSearchParams(location.search).get("s") || "{}") || {}; } catch (e) { state = {}; }
   var initial = {
     writer: WRITERS.indexOf(state.writer) >= 0 ? state.writer : "claude",
-    reviewer: REVIEWERS.indexOf(state.reviewer) >= 0 ? state.reviewer : "codex"
+    reviewer: REVIEWERS.indexOf(state.reviewer) >= 0 ? state.reviewer : "codex",
+    releaser: RELEASERS.indexOf(state.releaser) >= 0 ? state.releaser : "claude"
   };
-  var cur = { writer: initial.writer, reviewer: initial.reviewer, clear: false };
+  var cur = { writer: initial.writer, reviewer: initial.reviewer, releaser: initial.releaser, clear: false };
 
   function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function pill(engine) {
@@ -115,6 +121,7 @@
   function render() {
     document.getElementById("writers").innerHTML = rows(WRITERS, cur.writer, "writer");
     document.getElementById("reviewers").innerHTML = rows(REVIEWERS, cur.reviewer, "reviewer");
+    document.getElementById("releasers").innerHTML = rows(RELEASERS, cur.releaser, "releaser");
     document.querySelectorAll("[data-engine]").forEach(function (el) {
       el.addEventListener("click", function () {
         cur[el.getAttribute("data-group")] = el.getAttribute("data-engine");
@@ -124,7 +131,7 @@
     refresh();
   }
   function haptic() { try { tg && tg.HapticFeedback && tg.HapticFeedback.selectionChanged(); } catch (e) {} }
-  function changed() { return cur.writer !== initial.writer || cur.reviewer !== initial.reviewer || cur.clear; }
+  function changed() { return cur.writer !== initial.writer || cur.reviewer !== initial.reviewer || cur.releaser !== initial.releaser || cur.clear; }
   function refresh() { if (!tg || !tg.MainButton) return; changed() ? tg.MainButton.show() : tg.MainButton.hide(); }
 
   document.getElementById("clear").addEventListener("change", function (ev) { cur.clear = ev.target.checked; haptic(); refresh(); });
@@ -136,7 +143,7 @@
     try { tg.setHeaderColor("secondary_bg_color"); tg.setBackgroundColor("secondary_bg_color"); } catch (e) {}
     tg.MainButton.setText("保存");
     tg.MainButton.onClick(function () {
-      tg.sendData(JSON.stringify({ first: cur.writer, reviewer: cur.reviewer, clear: cur.clear }));
+      tg.sendData(JSON.stringify({ first: cur.writer, reviewer: cur.reviewer, releaser: cur.releaser, clear: cur.clear }));
     });
   } else if (!location.search) {
     document.getElementById("outside").style.display = "block";
